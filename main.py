@@ -3,6 +3,8 @@ import argparse
 from google import genai
 from google.genai import types # type: ignore
 from dotenv import load_dotenv # type: ignore
+from prompts import system_prompt
+from functions.call_function import available_functions, call_function
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -16,7 +18,15 @@ args = parser.parse_args()
 
 messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
 
-response = client.models.generate_content(model='gemini-2.5-flash', contents=messages)
+results = []
+
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents=messages,
+    config=types.GenerateContentConfig(
+        tools=[available_functions], system_instruction=system_prompt
+    )   
+)
 
 if response.usage_metadata is None:
     raise RuntimeError("no usage metadata found")
@@ -24,11 +34,25 @@ if response.usage_metadata is None:
 prompt_token = response.usage_metadata.prompt_token_count
 response_token = response.usage_metadata.candidates_token_count
 
-if args.verbose:
-    print(f"""
-    User prompt: {args.user_prompt}
-    Prompt tokens: {prompt_token}
-    Response tokens: {response_token}
-    """)
+# if args.verbose:
+#     print(f"""
+#     User prompt: {args.user_prompt}
+#     Prompt tokens: {prompt_token}
+#     Response tokens: {response_token}
+#     """)
 
-print(response.text)
+# for call in response.function_calls:
+#     print(f"Calling function: {call.name}({call.args})")
+# print(response.text)
+
+function_call_result = call_function(response.function_calls[0], verbose=args.verbose)
+if function_call_result.parts is None:
+    raise Exception("function_call_result parts is empty")
+elif function_call_result.parts[0].function_response is None:
+    raise Exception("function_call_result parts function_response is empty")
+elif function_call_result.parts[0].function_response.response is None:
+    raise Exception("function_call_result parts function_response response is empty")
+
+results.append(function_call_result.parts[0])
+if args.verbose:
+    print(f"-> {function_call_result.parts[0].function_response.response}")
