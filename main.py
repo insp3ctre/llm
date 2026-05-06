@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 from google import genai
 from google.genai import types # type: ignore
@@ -18,41 +19,49 @@ args = parser.parse_args()
 
 messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
 
-results = []
+MAX_ITERATIONS = 20
 
-response = client.models.generate_content(
-    model='gemini-2.5-flash',
-    contents=messages,
-    config=types.GenerateContentConfig(
-        tools=[available_functions], system_instruction=system_prompt
-    )   
-)
+for i in range(MAX_ITERATIONS):
 
-if response.usage_metadata is None:
-    raise RuntimeError("no usage metadata found")
+    results = []
 
-prompt_token = response.usage_metadata.prompt_token_count
-response_token = response.usage_metadata.candidates_token_count
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=messages,
+        config=types.GenerateContentConfig(
+            tools=[available_functions], system_instruction=system_prompt
+        )   
+    )
 
-# if args.verbose:
-#     print(f"""
-#     User prompt: {args.user_prompt}
-#     Prompt tokens: {prompt_token}
-#     Response tokens: {response_token}
-#     """)
+    if len(response.candidates) >= 1:
+        for can in response.candidates:
+            messages.append(can.content)
 
-# for call in response.function_calls:
-#     print(f"Calling function: {call.name}({call.args})")
-# print(response.text)
+    if response.usage_metadata is None:
+        raise RuntimeError("no usage metadata found")
 
-function_call_result = call_function(response.function_calls[0], verbose=args.verbose)
-if function_call_result.parts is None:
-    raise Exception("function_call_result parts is empty")
-elif function_call_result.parts[0].function_response is None:
-    raise Exception("function_call_result parts function_response is empty")
-elif function_call_result.parts[0].function_response.response is None:
-    raise Exception("function_call_result parts function_response response is empty")
+    prompt_token = response.usage_metadata.prompt_token_count
+    response_token = response.usage_metadata.candidates_token_count
 
-results.append(function_call_result.parts[0])
-if args.verbose:
-    print(f"-> {function_call_result.parts[0].function_response.response}")
+
+    if response.function_calls is None or len(response.function_calls) == 0:
+        print("No more functions to call")
+        break
+    
+    for call in response.function_calls:
+        function_call_result = call_function(call, verbose=args.verbose)
+
+    if function_call_result.parts is None:
+        raise Exception("function_call_result parts is empty")
+    elif function_call_result.parts[0].function_response is None:
+        raise Exception("function_call_result parts function_response is empty")
+    elif function_call_result.parts[0].function_response.response is None:
+        raise Exception("function_call_result parts function_response response is empty")
+
+    results.append(function_call_result.parts[0])
+    if args.verbose:
+        print(f"-> {function_call_result.parts[0].function_response.response}")
+    
+    messages.append(types.Content(role="user", parts=results))
+
+print(response.text)
